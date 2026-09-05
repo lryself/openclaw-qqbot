@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-type Context = { sessionKey?: string; runId?: string; toolCallId?: string };
+type Context = { sessionKey?: string; runId?: string; toolCallId?: string; requester?: { channel?: string; senderId?: string } };
 type Call = { toolName: string; params: Record<string, unknown>; toolCallId?: string; error?: string; result?: unknown };
 type Entry = { callId?: string; expires: number; blockedTools: Set<string> };
 
@@ -9,14 +9,18 @@ type Entry = { callId?: string; expires: number; blockedTools: Set<string> };
 export function createVoiceDeliveryGuard() {
   const turns = new Map<string, Map<string, Entry>>();
   function identity(event: Call, ctx: Context) {
-    if (!ctx.sessionKey?.includes(':qqbot:') || !ctx.runId) return;
+    if (!ctx.sessionKey || !ctx.runId) return;
+    const scopedSession = ctx.sessionKey.includes(':qqbot:');
+    if (!scopedSession && ctx.requester?.channel !== 'qqbot') return;
     const p = event.params;
     const text = event.toolName === 'tts' ? p.text
       : event.toolName === 'message' && p.action === 'send' && p.asVoice === true ? p.voiceText : undefined;
     if (typeof text !== 'string' || !text.trim()) return;
     // Explicit cross-conversation sends must remain independent.
     if (event.toolName === 'message' && typeof p.target === 'string' &&
-        !ctx.sessionKey.toLowerCase().endsWith(p.target.replace(/^qqbot:/, '').toLowerCase())) return;
+        !(scopedSession
+          ? ctx.sessionKey.toLowerCase().endsWith(p.target.replace(/^qqbot:/, '').toLowerCase())
+          : p.target.toLowerCase() === `qqbot:c2c:${ctx.requester?.senderId ?? ''}`.toLowerCase())) return;
     const digest = createHash('sha256').update(text.trim().replace(/\s+/g, ' ')).digest('hex');
     return { turn: `${ctx.sessionKey}\0${ctx.runId}`, digest };
   }
