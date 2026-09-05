@@ -36,6 +36,19 @@ test('normalizes quoted image and video attachments while preserving current att
   );
 });
 
+test('recovers a quoted image from the persisted QQ quote text when the attachment array is absent', () => {
+  const attachments = collectInboundAttachments(undefined, undefined, [
+    '=== 消息 1 ===',
+    '[附件1] 类型:图片 文件名:cat.webp 尺寸:1080x1440 大小:130.0KB URL:https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=example&rkey=example&spec=0',
+  ].join('\n'));
+
+  assert.deepStrictEqual(attachments, [{
+    content_type: 'image/webp',
+    filename: 'cat.webp',
+    url: 'https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=example&rkey=example&spec=0',
+  }]);
+});
+
 test('passes downloaded quoted image and video to OpenClaw as native media', () => {
   let inbound: Record<string, unknown> | undefined;
   buildCtxPayload({

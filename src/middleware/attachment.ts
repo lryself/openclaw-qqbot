@@ -55,10 +55,11 @@ interface AttachmentMiddlewareOptions {
 export function attachmentProcessor(opts: AttachmentMiddlewareOptions) {
   return async (ctx: MiddlewareContext, next: () => Promise<void>) => {
     const msg = ctx.message;
-    const quote = ctx.state.quote as { attachments?: readonly QuotedAttachment[] } | undefined;
+    const quote = ctx.state.quote as { attachments?: readonly QuotedAttachment[]; text?: string } | undefined;
     const attachments = collectInboundAttachments(
       msg.attachments as MessageAttachment[] | undefined,
       quote?.attachments,
+      quote?.text,
     );
 
     if (attachments?.length) {
