@@ -30,10 +30,14 @@ export function buildCtxPayload(params: CtxPayloadParams): any {
   const groupId = convKind === 'group' ? envelope.groupId : undefined;
 
   const processed = ctx.state.processedAttachments as any;
-  const voicePaths = processed?.localMediaPaths?.filter((_: string, i: number) =>
-    processed.localMediaTypes?.[i]?.startsWith('audio/')) ?? [];
-  const voiceUrls = processed?.remoteMediaUrls?.filter((_: string, i: number) =>
-    processed.remoteMediaUrls?.[i]?.startsWith?.('audio/')) ?? [];
+  const localMedia = processed?.localMediaPaths?.map((localPath: string, i: number) => ({
+    contentType: processed.localMediaTypes?.[i] ?? 'application/octet-stream',
+    localPath,
+  })) ?? [];
+  const remoteMedia = processed?.remoteMediaUrls?.map((url: string, i: number) => ({
+    contentType: processed.remoteMediaTypes?.[i] ?? 'application/octet-stream',
+    url,
+  })) ?? [];
 
   const msgTimestamp = (msg as any).timestamp ?? (msg as any).Timestamp;
 
@@ -73,14 +77,10 @@ export function buildCtxPayload(params: CtxPayloadParams): any {
     command: isSlashCommand
       ? { kind: 'text-slash' as const, body: assembled.rawBody!, authorized: true }
       : undefined,
-    media: voicePaths.length > 0
-      ? voicePaths.map((p: string, i: number) => ({
-          contentType: processed?.localMediaTypes?.[i] ?? 'audio/silk',
-          localPath: p,
-          url: voiceUrls[i],
-        }))
-      : voiceUrls.length > 0
-        ? voiceUrls.map((u: string) => ({ contentType: 'audio/wav', url: u }))
+    media: localMedia.length > 0
+      ? localMedia
+      : remoteMedia.length > 0
+        ? remoteMedia
         : undefined,
     supplemental: {
       quote: envelope.quote

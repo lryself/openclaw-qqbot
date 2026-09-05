@@ -9,7 +9,7 @@
  * 插入位置：envelopeFormatter 之前
  */
 import * as path from 'node:path';
-import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
+import type { MiddlewareContext, QuotedAttachment } from '@tencent-connect/qqbot-nodejs';
 import {
   convertSilkToWav,
   isVoiceAttachment,
@@ -19,6 +19,9 @@ import { transcribeAudio, resolveSTTConfig } from '../utils/stt.js';
 import { formatVoiceText, formatDuration, type VoiceTranscript, type TranscriptSource } from '../utils/voice-text.js';
 import { downloadRemoteMedia } from '../adapter/media.js';
 import { getAdapters } from '../adapter/resolve.js';
+import { collectInboundAttachments } from './attachment-input.js';
+
+export { collectInboundAttachments } from './attachment-input.js';
 
 export { formatVoiceText, formatDuration };
 export type { VoiceTranscript, TranscriptSource };
@@ -35,6 +38,8 @@ export interface ProcessedAttachments {
   localMediaTypes: string[];
   /** 远端 URL 列表（下载失败时的回退） */
   remoteMediaUrls: string[];
+  /** 对应 remoteMediaUrls 的 MIME type */
+  remoteMediaTypes: string[];
 }
 
 interface AttachmentMiddlewareOptions {
@@ -50,7 +55,11 @@ interface AttachmentMiddlewareOptions {
 export function attachmentProcessor(opts: AttachmentMiddlewareOptions) {
   return async (ctx: MiddlewareContext, next: () => Promise<void>) => {
     const msg = ctx.message;
-    const attachments = msg.attachments as MessageAttachment[] | undefined;
+    const quote = ctx.state.quote as { attachments?: readonly QuotedAttachment[] } | undefined;
+    const attachments = collectInboundAttachments(
+      msg.attachments as MessageAttachment[] | undefined,
+      quote?.attachments,
+    );
 
     if (attachments?.length) {
       const runtime = opts.getRuntime();
@@ -86,6 +95,7 @@ async function processAttachments(
   const localMediaPaths: string[] = [];
   const localMediaTypes: string[] = [];
   const remoteMediaUrls: string[] = [];
+  const remoteMediaTypes: string[] = [];
 
   // 并行下载所有附件
   const tasks = attachments.map(async (att) => {
@@ -106,9 +116,21 @@ async function processAttachments(
     // other 类型也尝试下载
     if (url) {
       const localPath = await downloadMediaFile(url, att.filename, log);
-      return { type: 'other' as const, localPath, url, filename: att.filename ?? att.content_type };
+      return {
+        type: 'other' as const,
+        localPath,
+        url,
+        filename: att.filename ?? att.content_type,
+        contentType: att.content_type ?? 'application/octet-stream',
+      };
     }
-    return { type: 'other' as const, localPath: null, url: '', filename: att.filename ?? att.content_type };
+    return {
+      type: 'other' as const,
+      localPath: null,
+      url: '',
+      filename: att.filename ?? att.content_type,
+      contentType: att.content_type ?? 'application/octet-stream',
+    };
   });
 
   const results = await Promise.all(tasks);
@@ -123,6 +145,7 @@ async function processAttachments(
       } else {
         imageUrls.push(result.url);
         remoteMediaUrls.push(result.url);
+        remoteMediaTypes.push(result.contentType);
       }
     } else if (result.type === 'voice') {
       transcripts.push(result.transcript);
@@ -131,14 +154,19 @@ async function processAttachments(
         localMediaTypes.push('audio/wav');
       } else if (result.transcript.remoteUrl) {
         remoteMediaUrls.push(result.transcript.remoteUrl);
+        remoteMediaTypes.push('audio/wav');
       }
     } else if (result.type === 'other') {
       if (result.localPath) {
         otherParts.push(`[Attachment: ${result.localPath}]`);
         localMediaPaths.push(result.localPath);
-        localMediaTypes.push('application/octet-stream');
+        localMediaTypes.push(result.contentType);
       } else {
         otherParts.push(`[Attachment: ${result.filename}]`);
+        if (result.url) {
+          remoteMediaUrls.push(result.url);
+          remoteMediaTypes.push(result.contentType);
+        }
       }
     }
   }
@@ -151,6 +179,7 @@ async function processAttachments(
     localMediaPaths,
     localMediaTypes,
     remoteMediaUrls,
+    remoteMediaTypes,
   };
 }
 

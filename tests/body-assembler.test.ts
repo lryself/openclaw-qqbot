@@ -281,7 +281,7 @@ test('quote 无 text：fallback Original content unavailable', () => {
 
 group('agentBody · history 前缀 / 命令直通');
 
-test('群被@且有 history：前置 [Chat messages since...] 块', () => {
+test('群被@且有 history：前置 [Chat history] 块', () => {
   const ctx = makeCtx({
     sanitizedContent: '问题',
     kind: 'group',
@@ -298,11 +298,11 @@ test('群被@且有 history：前置 [Chat messages since...] 块', () => {
   const msg = makeMsg({ sanitizedContent: '问题', kind: 'group', senderId: 'u1', senderName: 'Me' });
   const { agentBody } = assembleBody(ctx, msg, fakeAccount);
   assert.ok(
-    agentBody.startsWith('[Chat messages since your last reply — CONTEXT ONLY]\n'),
+    agentBody.startsWith('[Chat history begins]\n'),
     `agentBody=\n${agentBody}`,
   );
   assert.ok(agentBody.includes('[A (a)] msg-a\n[B (b)] msg-b'), agentBody);
-  assert.ok(agentBody.includes('[CURRENT MESSAGE — reply to this]\n[Me (u1)] 问题 (@you)'), agentBody);
+  assert.ok(agentBody.includes('[Current message]\n[Me (u1)] 问题 (@you)'), agentBody);
 });
 
 test('群未被@：不前置 history 块', () => {
@@ -380,6 +380,10 @@ function makeProcessed(input: {
     transcripts: input.transcripts ?? [],
     voiceText: input.voiceText ?? '',
     otherInfo: input.otherInfo ?? '',
+    localMediaPaths: [],
+    localMediaTypes: [],
+    remoteMediaUrls: [],
+    remoteMediaTypes: [],
   };
 }
 
