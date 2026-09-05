@@ -15,7 +15,7 @@ import { setQQBotRuntime } from './src/runtime.js';
 import { registerPlatformTool } from './src/tools/platform.js';
 import { registerRemindTool } from './src/tools/remind.js';
 import { verifyRuntimeContract } from './src/adapter/contract.js';
-import { createVoiceDeliveryGuard } from './src/features/voice-delivery-guard.js';
+import { voiceDeliveryGuard } from './src/features/voice-delivery-guard.js';
 
 let registered = false;
 
@@ -42,7 +42,7 @@ const plugin = {
     api.registerChannel({ plugin: qqbotPlugin as any });
     registerPlatformTool(api);
     registerRemindTool(api);
-    const guard = createVoiceDeliveryGuard();
+    const guard = voiceDeliveryGuard;
     const on = api.on as (name: string, handler: (...args: any[]) => unknown) => void;
     on('before_tool_call', guard.before);
     on('after_tool_call', guard.after);

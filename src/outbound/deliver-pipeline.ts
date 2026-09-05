@@ -19,10 +19,12 @@ import type { PluginLogger } from '../utils/plugin-logger.js';
 import { isPathInAllowedRoots } from './local-file-router.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { voiceDeliveryGuard } from '../features/voice-delivery-guard.js';
 
 // ── 类型 ──
 
 export interface DeliverPayload {
+  isError?: boolean;
   text?: string;
   mediaUrl?: string;
   mediaUrls?: string[];
@@ -34,6 +36,8 @@ export interface DeliverInfo {
 }
 
 export interface DeliverContext {
+  sessionKey?: string;
+  runId?: string;
   qualifiedTarget: string;
   accountId: string;
   replyToId: string;
@@ -92,6 +96,10 @@ export async function deliverReply(
   _info: DeliverInfo | undefined,
   ctx: DeliverContext,
 ): Promise<void> {
+  if (voiceDeliveryGuard.consumeDuplicateNotice(payload, ctx)) {
+    ctx.log?.info('Suppressed duplicate-voice tool notice for this turn');
+    return;
+  }
   const text = payload.text?.trim() ?? '';
   const mediaUrls = resolveMediaUrls(payload);
   const hasMedia = mediaUrls.length > 0;

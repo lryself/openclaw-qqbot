@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 type Context = { sessionKey?: string; runId?: string; toolCallId?: string };
 type Call = { toolName: string; params: Record<string, unknown>; toolCallId?: string; error?: string; result?: unknown };
-type Entry = { callId?: string; expires: number };
+type Entry = { callId?: string; expires: number; blockedTools: Set<string> };
 
 // TTS tool output is auto-delivered. A second synthesis via message.voiceText
 // is another send, even when both calls belong to the same inbound message.
@@ -30,12 +30,15 @@ export function createVoiceDeliveryGuard() {
         if (!entries.size) turns.delete(key);
       }
       const entries = turns.get(id.turn) ?? new Map<string, Entry>();
-      if (entries.has(id.digest)) return {
+      if (entries.has(id.digest)) {
+        entries.get(id.digest)!.blockedTools.add(event.toolName);
+        return {
         block: true,
         blockReason: 'This spoken text was already submitted for delivery in this QQ turn. Do not synthesize or send it again. Finish with NO_REPLY.',
-      };
+        };
+      }
       if (turns.size >= 256 && !turns.has(id.turn)) turns.delete(turns.keys().next().value!);
-      entries.set(id.digest, { callId: ctx.toolCallId ?? event.toolCallId, expires: now + 30 * 60_000 });
+      entries.set(id.digest, { callId: ctx.toolCallId ?? event.toolCallId, expires: now + 30 * 60_000, blockedTools: new Set() });
       turns.set(id.turn, entries);
     },
     after(event: Call, ctx: Context) {
@@ -53,5 +56,25 @@ export function createVoiceDeliveryGuard() {
     end(_event: unknown, ctx: Context) {
       if (ctx.sessionKey && ctx.runId) turns.delete(`${ctx.sessionKey}\0${ctx.runId}`);
     },
+    consumeDuplicateNotice(payload: { text?: string; isError?: boolean; mediaUrl?: string; mediaUrls?: string[] }, ctx: Context) {
+      if (!payload.isError || payload.mediaUrl || payload.mediaUrls?.length || !ctx.sessionKey || !ctx.runId) return false;
+      const entries = turns.get(`${ctx.sessionKey}\0${ctx.runId}`);
+      if (!entries) return false;
+      const text = payload.text?.replace(/^\s*⚠️?\s*/, '').trim().toLowerCase();
+      // OpenClaw renders a blocked tool as '<tool label> blocked'. Suppress
+      // only that diagnostic with this guard's matching same-turn receipt.
+      for (const entry of entries.values()) {
+        if (entry.expires <= Date.now()) continue;
+        for (const tool of entry.blockedTools) {
+          if (text === `${tool} blocked`) {
+            entry.blockedTools.delete(tool);
+            return true;
+          }
+        }
+      }
+      return false;
+    },
   };
 }
+
+export const voiceDeliveryGuard = createVoiceDeliveryGuard();

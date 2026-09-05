@@ -8,6 +8,11 @@ const send = { toolName: 'message', params: { action: 'send', target: 'qqbot:gro
 assert.equal(guard.before(tts, ctx), undefined);
 guard.after({ ...tts, result: { content: [{ type: 'text', text: '(spoken) 测试一次～' }] } }, ctx);
 assert.equal(guard.before(send, { ...ctx, toolCallId: 'send-1' })?.block, true);
+assert.equal(guard.consumeDuplicateNotice({ text: '⚠️ Message blocked', isError: true }, { ...ctx, runId: 'unrelated' }), false);
+assert.equal(guard.consumeDuplicateNotice({ text: '⚠️ Message failed', isError: true }, ctx), false);
+assert.equal(guard.consumeDuplicateNotice({ text: '⚠️ Message blocked' }, ctx), false);
+assert.equal(guard.consumeDuplicateNotice({ text: '⚠️ Message blocked', isError: true }, ctx), true);
+assert.equal(guard.consumeDuplicateNotice({ text: '⚠️ Message blocked', isError: true }, ctx), false);
 guard.after({ ...send, error: 'blocked' }, { ...ctx, toolCallId: 'send-1' });
 assert.equal(guard.before(tts, { ...ctx, toolCallId: 'tts-2' })?.block, true);
 assert.equal(guard.before(tts, { ...ctx, runId: 'turn-2' }), undefined);

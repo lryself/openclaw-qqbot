@@ -79,6 +79,8 @@ export async function dispatchToOpenClaw(
     : undefined;
 
   const deliverCtx: DeliverContext = {
+    sessionKey: route.sessionKey,
+    runId: envelope.messageId,
     qualifiedTarget,
     accountId: account.accountId,
     replyToId: envelope.messageId,
