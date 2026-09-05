@@ -36,6 +36,8 @@ export interface DeliverInfo {
 }
 
 export interface DeliverContext {
+  voiceRequested?: boolean;
+  voiceDelivered?: boolean;
   sessionKey?: string;
   runId?: string;
   qualifiedTarget: string;
@@ -107,12 +109,18 @@ export async function deliverReply(
   ctx.log?.debug(`[text] textLen=${text.length} mediaCount=${mediaUrls.length}`);
 
   // ── Layer 1: 语音意图 ──
-  if (payload.audioAsVoice) {
+  if (payload.audioAsVoice || (ctx.voiceRequested && !hasMedia)) {
+    if (ctx.voiceDelivered) return;
     if (ctx.textToSpeech && text) {
       const handled = await handleVoiceIntent(text, ctx);
       if (handled) {
+        ctx.voiceDelivered = true;
         return; // 语音已发送，不再重复发送媒体或文本
       }
+    }
+    if (ctx.voiceRequested && !hasMedia) {
+      await ctx.sendText(ctx.qualifiedTarget, '语音合成或发送失败，请稍后重试。');
+      return;
     }
     // TTS 不可用或合成失败 → 降级为纯文本 + 媒体
   }

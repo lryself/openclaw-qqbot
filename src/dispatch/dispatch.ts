@@ -79,6 +79,7 @@ export async function dispatchToOpenClaw(
     : undefined;
 
   const deliverCtx: DeliverContext = {
+    voiceRequested: /^(?:请)?(?:用|使用)语音(?:回复|回答|说)/.test(assembled.rawBody.trim()),
     sessionKey: route.sessionKey,
     runId: envelope.messageId,
     qualifiedTarget,
