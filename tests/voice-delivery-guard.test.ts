@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { createVoiceDeliveryGuard } from '../src/features/voice-delivery-guard.js';
+
+const guard = createVoiceDeliveryGuard();
+const ctx = { sessionKey: 'agent:main:qqbot:group:example', runId: 'turn-1', toolCallId: 'tts-1' };
+const tts = { toolName: 'tts', params: { text: '测试一次～', channel: 'qqbot' } };
+const send = { toolName: 'message', params: { action: 'send', target: 'qqbot:group:example', asVoice: true, voiceText: '测试一次～' } };
+assert.equal(guard.before(tts, ctx), undefined);
+guard.after({ ...tts, result: { content: [{ type: 'text', text: '(spoken) 测试一次～' }] } }, ctx);
+assert.equal(guard.before(send, { ...ctx, toolCallId: 'send-1' })?.block, true);
+guard.after({ ...send, error: 'blocked' }, { ...ctx, toolCallId: 'send-1' });
+assert.equal(guard.before(tts, { ...ctx, toolCallId: 'tts-2' })?.block, true);
+assert.equal(guard.before(tts, { ...ctx, runId: 'turn-2' }), undefined);
+assert.equal(guard.before({ ...send, params: { ...send.params, target: 'qqbot:group:other' } }, ctx), undefined);
+assert.equal(guard.before(tts, { ...ctx, sessionKey: 'agent:main:feishu:group:example' }), undefined);
+guard.after({ ...tts, error: 'synthesis failed' }, { ...ctx, runId: 'turn-2' });
+assert.equal(guard.before(tts, { ...ctx, runId: 'turn-2', toolCallId: 'retry' }), undefined);
+guard.end({}, ctx);
+assert.equal(guard.before(tts, ctx), undefined);
+console.log('PASS: QQ duplicate TTS/message calls blocked; retry, next turn, other destinations preserved');
