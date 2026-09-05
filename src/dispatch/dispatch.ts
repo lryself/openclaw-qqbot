@@ -90,6 +90,7 @@ export async function dispatchToOpenClaw(
       to,
       source,
       text: opts?.text ?? '',
+      mediaKind: opts?.mediaKind,
       replyToId: envelope.messageId,
       accountId: account.accountId,
       agentId: route.agentId,
