@@ -46,7 +46,6 @@ const plugin = {
     const on = api.on as (name: string, handler: (...args: any[]) => unknown) => void;
     on('before_tool_call', guard.before);
     on('after_tool_call', guard.after);
-    on('agent_end', guard.end);
   },
 };
 
