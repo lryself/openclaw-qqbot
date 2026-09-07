@@ -26,6 +26,25 @@ interface RemindParams {
   jobId?: string;
 }
 
+interface ReminderJob {
+  id?: string;
+  name: string;
+  schedule: { kind: "at"; at: string } | { kind: "cron"; expr: string; tz: string };
+  sessionTarget: "isolated";
+  wakeMode: "now";
+  deleteAfterRun?: boolean;
+  payload: { kind: "agentTurn"; message: string };
+  delivery: { mode: "announce"; channel: "qqbot"; to: string; accountId: string };
+}
+
+interface ReminderCronService {
+  list: (opts?: { includeDisabled?: boolean }) => Promise<ReminderJob[]>;
+  add: (job: Omit<ReminderJob, "id">) => Promise<ReminderJob>;
+  remove: (id: string) => Promise<{ removed?: boolean }>;
+}
+
+let cronService: ReminderCronService | undefined;
+
 // ========== JSON Schema ==========
 
 const RemindSchema = {
@@ -134,16 +153,19 @@ function generateJobName(content: string): string {
 /**
  * 构建一次性提醒的 cron 工具参数
  */
-function buildOnceJob(params: RemindParams, delayMs: number, to: string, accountId: string) {
-  const atMs = Date.now() + delayMs;
+function buildOnceJob(
+  params: RemindParams,
+  delayMs: number,
+  to: string,
+  accountId: string,
+): Omit<ReminderJob, "id"> {
+  const at = new Date(Date.now() + delayMs).toISOString();
   const content = params.content!;
   const name = params.name || generateJobName(content);
 
   return {
-    action: "add",
-    job: {
       name,
-      schedule: { kind: "at", atMs },
+      schedule: { kind: "at", at },
       sessionTarget: "isolated",
       wakeMode: "now",
       deleteAfterRun: true,
@@ -157,21 +179,18 @@ function buildOnceJob(params: RemindParams, delayMs: number, to: string, account
         to,
         accountId,
       },
-    },
   };
 }
 
 /**
  * 构建周期提醒的 cron 工具参数
  */
-function buildCronJob(params: RemindParams, to: string, accountId: string) {
+function buildCronJob(params: RemindParams, to: string, accountId: string): Omit<ReminderJob, "id"> {
   const content = params.content!;
   const name = params.name || generateJobName(content);
   const tz = params.timezone || "Asia/Shanghai";
 
   return {
-    action: "add",
-    job: {
       name,
       schedule: { kind: "cron", expr: params.time!.trim(), tz },
       sessionTarget: "isolated",
@@ -186,7 +205,6 @@ function buildCronJob(params: RemindParams, to: string, accountId: string) {
         to,
         accountId,
       },
-    },
   };
 }
 
@@ -219,6 +237,14 @@ function formatDelay(ms: number): string {
 // ========== 注册入口 ==========
 
 export function registerRemindTool(api: OpenClawPluginApi): void {
+  const on = api.on as (name: string, handler: (...args: any[]) => unknown) => void;
+  on("gateway_start", (_event, ctx) => {
+    cronService = ctx.getCron?.() as ReminderCronService | undefined;
+  });
+  on("gateway_stop", () => {
+    cronService = undefined;
+  });
+
   api.registerTool(
     {
       name: "qqbot_remind",
@@ -231,15 +257,19 @@ export function registerRemindTool(api: OpenClawPluginApi): void {
         "删除提醒：action=remove, jobId=任务ID（先 list 获取）\n" +
         "时间格式示例：\"5m\"(5分钟后) \"1h\"(1小时后) \"0 8 * * *\"(每天8点)",
       parameters: RemindSchema,
-      execute(_toolCallId, params) {
+      async execute(_toolCallId, params) {
         const p = params as RemindParams;
+        const cron = cronService;
+        if (!cron) {
+          throw new Error("提醒调度器当前不可用，请稍后重试；不要告诉用户提醒已经设置");
+        }
 
         // ===== list =====
         if (p.action === "list") {
-          return json({
-            _instruction: "请立即使用 cron 工具执行以下参数",
-            cronParams: { action: "list" },
-          });
+          const target = p.to || getRequestTarget();
+          const jobs = (await cron.list({ includeDisabled: true })).filter((job) =>
+            job.delivery?.channel === "qqbot" && (!target || job.delivery.to === target));
+          return json({ ok: true, reminders: jobs });
         }
 
         // ===== remove =====
@@ -247,10 +277,14 @@ export function registerRemindTool(api: OpenClawPluginApi): void {
           if (!p.jobId) {
             return json({ error: "action=remove 时 jobId 为必填参数。请先用 action=list 获取 jobId。" });
           }
-          return json({
-            _instruction: "请立即使用 cron 工具执行以下参数",
-            cronParams: { action: "remove", jobId: p.jobId },
-          });
+          const target = p.to || getRequestTarget();
+          const job = (await cron.list({ includeDisabled: true })).find((candidate) =>
+            candidate.id === p.jobId && candidate.delivery?.channel === "qqbot" &&
+            (!target || candidate.delivery.to === target));
+          if (!job) throw new Error("未找到当前 QQ 会话可删除的提醒任务");
+          const removed = await cron.remove(p.jobId);
+          if (!removed.removed) throw new Error("提醒任务删除失败，请稍后重试");
+          return json({ ok: true, removed: true, jobId: p.jobId });
         }
 
         // ===== add =====
@@ -272,9 +306,12 @@ export function registerRemindTool(api: OpenClawPluginApi): void {
         if (isCronExpression(p.time)) {
           // 周期提醒
           const cronJob = buildCronJob(p, resolvedTo, resolvedAccountId);
+          const created = await cron.add(cronJob);
+          if (!created?.id) throw new Error("调度器未返回任务 ID，提醒未确认创建");
           return json({
-            _instruction: "请立即使用 cron 工具，将 cronParams 的值原样作为参数传入（不要修改或省略任何字段，特别是 delivery.accountId），然后回复用户提醒已设置",
-            cronParams: cronJob,
+            ok: true,
+            jobId: created.id,
+            job: created,
             summary: `⏰ 周期提醒: "${p.content}" (${p.time}, tz=${p.timezone || "Asia/Shanghai"})`,
           });
         }
@@ -294,9 +331,12 @@ export function registerRemindTool(api: OpenClawPluginApi): void {
         }
 
         const onceJob = buildOnceJob(p, delayMs, resolvedTo, resolvedAccountId);
+        const created = await cron.add(onceJob);
+        if (!created?.id) throw new Error("调度器未返回任务 ID，提醒未确认创建");
         return json({
-          _instruction: "请立即使用 cron 工具，将 cronParams 的值原样作为参数传入（不要修改或省略任何字段，特别是 delivery.accountId），然后回复用户提醒已设置",
-          cronParams: onceJob,
+          ok: true,
+          jobId: created.id,
+          job: created,
           summary: `⏰ ${formatDelay(delayMs)}后提醒: "${p.content}"`,
         });
       },
@@ -305,4 +345,3 @@ export function registerRemindTool(api: OpenClawPluginApi): void {
   );
 
 }
-

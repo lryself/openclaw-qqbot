@@ -14,9 +14,9 @@ metadata: {"openclaw":{"emoji":"⏰","requires":{"config":["channels.qqbot"]}}}
 
 ---
 
-## 推荐流程（优先使用 `qqbot_remind` 工具）
+## 使用 `qqbot_remind`
 
-**第一步**：调用 `qqbot_remind` 工具，传入简单参数：
+调用 `qqbot_remind` 工具一次，传入以下参数：
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
@@ -26,94 +26,17 @@ metadata: {"openclaw":{"emoji":"⏰","requires":{"config":["channels.qqbot"]}}}
 | `time` | 时间（相对时间或 cron 表达式） | `"5m"` / `"1h30m"` / `"0 8 * * *"` |
 | `jobId` | 任务 ID（仅 remove） | `"xxx"` |
 
-**第二步**：`qqbot_remind` 会返回 `cronParams`，你必须**立即**将 `cronParams` 的值**原样**作为参数调用 `cron` 工具。**禁止修改、省略或重组 `cronParams` 中的任何字段**（尤其是 `delivery` 对象中的 `accountId`）。
+`qqbot_remind` 会直接操作持久化调度器。只有结果同时包含 `ok: true` 和非空 `jobId`，才可以告诉用户提醒已设置。工具报错、缺少 `jobId` 或返回 `ok: false` 时，应说明实际失败原因，不能承诺会提醒。
 
-**第三步**：根据 `cron` 工具的返回结果，回复用户。
+不要在 `qqbot_remind` 之后调用 `cron`；这会重复创建同一任务。
 
 ### 示例
 
 用户说："5分钟后提醒我喝水"
 
 1. 调用 `qqbot_remind`：`{ "action": "add", "content": "喝水", "time": "5m" }`
-2. 收到返回的 `cronParams` → 立即调用 `cron` 工具，参数为该 `cronParams`
+2. 确认返回 `ok: true` 和 `jobId`
 3. 回复用户：`⏰ 好的，5分钟后提醒你喝水~`
-
----
-
-## 备用方案（直接使用 `cron` 工具）
-
-> 仅当 `qqbot_remind` 工具不可用时使用以下方式。
-
-### 核心规则
-
-> **payload.kind 必须是 `"agentTurn"`，绝对不能用 `"systemEvent"`！**
-> `systemEvent` 只在 AI 会话内部注入文本，用户收不到 QQ 消息。
-
-**5 个不可更改字段**：
-
-| 字段 | 固定值 | 原因 |
-|------|--------|------|
-| `payload.kind` | `"agentTurn"` | `systemEvent` 不会发 QQ 消息 |
-| `delivery.mode` | `"announce"` | 投递模式 |
-| `delivery.channel` | `"qqbot"` | QQ 通道标识 |
-| `delivery.to` | 用户 openid | 从 `To` 字段获取 |
-| `sessionTarget` | `"isolated"` | 隔离会话避免污染 |
-
-> `delivery.accountId` 必须填写当前会话的账户 ID（如果已知），以确保多账户场景下消息通过正确的机器人账户发送。
-
-> `schedule.atMs` 必须是**绝对毫秒时间戳**（如 `1770733800000`），不支持 `"5m"` 等相对字符串。
-> 计算方式：`当前时间戳ms + 延迟毫秒`。
-
-### 一次性提醒（schedule.kind = "at"）
-
-```json
-{
-  "action": "add",
-  "job": {
-    "name": "{任务名}",
-    "schedule": { "kind": "at", "atMs": "{当前时间戳ms + N*60000}" },
-    "sessionTarget": "isolated",
-    "wakeMode": "now",
-    "deleteAfterRun": true,
-    "payload": {
-      "kind": "agentTurn",
-      "message": "你是一个暖心的提醒助手。请用温暖、有趣的方式提醒用户：{提醒内容}。要求：(1) 不要回复HEARTBEAT_OK (2) 不要解释你是谁 (3) 直接输出一条暖心的提醒消息 (4) 可以加一句简短的鸡汤或关怀的话 (5) 控制在2-3句话以内 (6) 用emoji点缀"
-    },
-    "delivery": {
-      "mode": "announce",
-      "channel": "qqbot",
-      "to": "{openid}",
-      "accountId": "{accountId}"
-    }
-  }
-}
-```
-
-### 周期提醒（schedule.kind = "cron"）
-
-```json
-{
-  "action": "add",
-  "job": {
-    "name": "{任务名}",
-    "schedule": { "kind": "cron", "expr": "0 8 * * *", "tz": "Asia/Shanghai" },
-    "sessionTarget": "isolated",
-    "wakeMode": "now",
-    "payload": {
-      "kind": "agentTurn",
-      "message": "你是一个暖心的提醒助手。请用温暖、有趣的方式提醒用户：{提醒内容}。要求：(1) 不要回复HEARTBEAT_OK (2) 不要解释你是谁 (3) 直接输出一条暖心的提醒消息 (4) 可以加一句简短的鸡汤或关怀的话 (5) 控制在2-3句话以内 (6) 用emoji点缀"
-    },
-    "delivery": {
-      "mode": "announce",
-      "channel": "qqbot",
-      "to": "{openid}",
-      "accountId": "{accountId}"
-    }
-  }
-}
-```
-
-> 周期任务**不加** `deleteAfterRun`。群聊 `to` 格式为 `"qqbot:group:{group_openid}"`。
 
 ---
 
@@ -155,5 +78,4 @@ metadata: {"openclaw":{"emoji":"⏰","requires":{"config":["channels.qqbot"]}}}
 - 周期：`⏰ 收到，{周期}提醒你{内容}~`
 - 查询无结果：`📋 目前没有提醒哦~ 说"5分钟后提醒我xxx"试试？`
 - 删除成功：`✅ 已取消"{名称}"`
-
-openclaw cron add \ --name "下班提醒" \ --at "2026-03-26T21:42:31+08:00" \ --message "test" \ --to …``
+- 创建失败：`提醒没有创建成功：{工具返回的实际原因}`
